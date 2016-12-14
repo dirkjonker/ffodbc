@@ -210,6 +210,20 @@ def test_cursor_fetch_double(cursor):
     assert result[0] == 12345.678
 
 
+def test_unicode_short(cursor):
+    """Test proper unicode handling."""
+    cursor.execute("SELECT CAST(N'Hallo \u24b9\u24d8\u24e1\u24da!' AS NVARCHAR(12)) AS v;")
+    result = cursor.fetchone()
+    assert result[0] == 'Hallo Ⓓⓘⓡⓚ!'
+
+
+def test_unicode_emoji(cursor):
+    """Test proper unicode handling for emojis."""
+    cursor.execute("SELECT CAST(NCHAR(0xD83D) + NCHAR(0xDE00) AS NVARCHAR(3)) AS v;")
+    result = cursor.fetchone()
+    assert result[0] == '😀'
+
+
 def test_calling_closed_cursor(cursor):
     """Calling a function on a closed cursor is a ProgrammingError."""
     cursor.close()

@@ -8,7 +8,7 @@ def unmarshal_datetime(val):
     """This function is slow! Should handle conversion in C instead."""
     return datetime.datetime(val.year, val.month, val.day,
                              val.hour, val.minute, val.second,
-                             val.fraction / 1000)
+                             val.fraction // 1000)
 
 
 def unmarshal_date(val):
