@@ -2,14 +2,6 @@ import datetime
 from decimal import Decimal
 
 
-def unmarshal_datetime(val):
-    return datetime.datetime.strptime(val, '%Y-%m-%d %H:%M:%S')
-
-
-def unmarshal_date(val):
-    return datetime.datetime.strptime(val, '%Y-%m-%d').date()
-
-
 TYPEMAP = {
     (-9): str,  # SQL_UNICODE_VARCHAR / SQL_WVARCHAR
     (-8): str,  # SQL_UNICODE_CHAR / SQL_WCHAR
@@ -23,7 +15,8 @@ TYPEMAP = {
     6: float,  # SQL_FLOAT
     7: float,  # SQL_REAL
     8: float,  # SQL_DOUBLE
-    9: unmarshal_datetime,  # SQL_DATETIME
+    9: datetime.datetime,  # SQL_DATETIME
     12: str,  # SQL_VARCHAR
-    91: unmarshal_date,  # SQL_TYPE_DATE
+    91: datetime.date,  # SQL_TYPE_DATE
+    93: datetime.datetime,  # SQL_TYPE_TIMESTAMP
 }

@@ -1,12 +1,20 @@
+#include <stdio.h>
+#include <wchar.h>
+#include <sql.h>
+#include <sqltypes.h>
+
 #include "ffodbc.h"
 
+
+#define COLNAME_LEN 255
 
 // Column contains information about a column
 // including the pointer to the array of data
 // where the ODBC drivers writes output to
 typedef struct Column {
   SQLUSMALLINT index;
-  SQLCHAR name[255];
+  SQLWCHAR name[COLNAME_LEN];
+  SQLSMALLINT name_len;
   SQLSMALLINT data_type;
   SQLSMALLINT target_type;
   SQLULEN size;
@@ -18,7 +26,7 @@ typedef struct Column {
   struct Column *next;
 } SQLCOLUMN;
 
-typedef enum cursorState {OPENED, CLOSED} cursor_state;
+typedef enum cursorState {OPENED, ALLOCATED, CLOSED} cursor_state;
 
 // Cursor contains all attributes of a cursor
 typedef struct Cursor {
@@ -26,6 +34,9 @@ typedef struct Cursor {
   cursor_state state;
   SQLULEN arraysize;
   SQLCOLUMN *firstcol;
+  SQLLEN rowcount;
+  SQLULEN rows_fetched;
+  SQLUSMALLINT *row_status;
 } SQLCURSOR;
 
 
@@ -92,14 +103,14 @@ SQLHENV Initialize() {
 
 
 // NewConnection makes a connection using an ODBC driver
-SQLHDBC NewConnection(SQLHENV henv, char *connstr) {
+SQLHDBC NewConnection(SQLHENV henv, SQLWCHAR *connstr, SQLLEN connstrlen) {
   SQLHDBC hdbc;
 
   tryODBC(SQLAllocHandle(SQL_HANDLE_DBC, henv, &hdbc),
            "SQLAllocHandle", henv, SQL_HANDLE_ENV);
-  tryODBC(SQLDriverConnect(hdbc, NULL, (SQLCHAR*)connstr, strlen(connstr),
+  tryODBC(SQLDriverConnectW(hdbc, NULL, connstr, connstrlen,
                             NULL, 0, NULL, SQL_DRIVER_NOPROMPT),
-           "SQLDriverConnect", hdbc, SQL_HANDLE_DBC);
+           "SQLDriverConnectW", hdbc, SQL_HANDLE_DBC);
   return hdbc;
 }
 
@@ -116,13 +127,6 @@ void CloseConnection(SQLHENV henv, SQLHDBC hdbc) {
 }
 
 
-// free_results clears the cursor for re-use or for closing
-// inspired by pyodbc
-static void free_results(SQLCURSOR *cursor) {
-
-}
-
-
 // dealloc_columns frees all memory taken by columns
 static void dealloc_columns(SQLCOLUMN *col) {
   SQLCOLUMN *nextcol;
@@ -135,6 +139,22 @@ static void dealloc_columns(SQLCOLUMN *col) {
   }
 }
 
+// free_results clears the cursor for re-use or for closing
+static void free_results(SQLCURSOR *cursor) {
+  if (cursor->state == OPENED) {
+    tryODBC(SQLFreeStmt(cursor->handle, SQL_CLOSE),
+            "SQLFreeStmt", cursor->handle, SQL_HANDLE_STMT);
+    // tryODBC(SQLFreeStmt(cursor->handle, SQL_UNBIND),
+    //         "SQLFreeStmt", cursor->handle, SQL_HANDLE_STMT);
+
+    if (cursor->row_status) free(cursor->row_status);
+
+    dealloc_columns(cursor->firstcol);
+
+    cursor->rowcount = -1;
+    cursor->state = CLOSED;
+  }
+}
 
 // NewCursor creates a statement handle for a database handle
 SQLCURSOR * NewCursor(SQLHDBC hdbc) {
@@ -143,6 +163,7 @@ SQLCURSOR * NewCursor(SQLHDBC hdbc) {
   cursor = (SQLCURSOR*)malloc(sizeof(SQLCURSOR));
   cursor->firstcol = NULL;
   cursor->arraysize = 1L;
+  cursor->rowcount = -1;
   cursor->state = CLOSED;
 
   tryODBC(SQLAllocHandle(SQL_HANDLE_STMT, hdbc, &cursor->handle),
@@ -167,14 +188,28 @@ int CursorSetArraysize(SQLCURSOR *cursor, SQLULEN arraysize) {
 }
 
 
-// CursorRowCount returns the number of rows
+// update_cursor_rowcount updates the number of rows
 // affected by an UPDATE, INSERT, or DELETE statement
-long CursorRowCount(SQLCURSOR *cursor) {
-  SQLLEN rowcount;
-
-  tryODBC(SQLRowCount(cursor->handle, &rowcount),
+void update_cursor_rowcount(SQLCURSOR *cursor) {
+  tryODBC(SQLRowCount(cursor->handle, &cursor->rowcount),
           "SQLRowCount", cursor->handle, SQL_HANDLE_STMT);
-  return rowcount;
+}
+
+
+static void set_fetch_attributes(SQLCURSOR *cursor) {
+  tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROW_ARRAY_SIZE,
+                         (SQLPOINTER)cursor->arraysize, 0),
+          "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
+
+  // how many rows are actually fetched after SQLFetch is called
+  tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROWS_FETCHED_PTR,
+                         (SQLPOINTER)&cursor->rows_fetched, 0),
+          "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
+
+  cursor->row_status = (SQLUSMALLINT*)malloc(sizeof(SQLUSMALLINT) * cursor->arraysize);
+  tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROW_STATUS_PTR,
+                         (SQLPOINTER)cursor->row_status, 0),
+          "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
 }
 
 
@@ -182,68 +217,67 @@ long CursorRowCount(SQLCURSOR *cursor) {
 // column data into
 static void bindCol(SQLHSTMT hstmt, SQLULEN arraysize, struct Column *col) {
   SQLSMALLINT target_type;
-  SQLLEN alloc_size;
-  // char message[100];
+  SQLLEN alloc_size, padding;
+
+  padding = 0;
 
   switch (col->data_type) {
     case SQL_CHAR:
     case SQL_VARCHAR:
     case SQL_LONGVARCHAR:
+      target_type = SQL_C_CHAR;
+      alloc_size = sizeof(SQLCHAR) * col->size + 1;  // NUL bit
+      break;
     case SQL_UNICODE_CHAR:
     case SQL_UNICODE_VARCHAR:
     case SQL_UNICODE_LONGVARCHAR:
-      // sprintf(message, "This is a character thing!\n");
-      target_type = SQL_C_CHAR;
-      alloc_size = sizeof(char) * col->size + 1;
+      target_type = SQL_C_WCHAR;
+      alloc_size = sizeof(SQLWCHAR) * col->size;
       break;
     case SQL_SMALLINT:
-      // sprintf(message, "Such a small Integer!\n");
       // target_type = SQL_C_SSHORT;
       // alloc_size = sizeof(short int);
       // break;
     case SQL_INTEGER:
-      // sprintf(message, "This is a normal Integer!\n");
-      // target_type = SQL_C_SLONG;
-      // alloc_size = sizeof(long int);
-      // break;
+      target_type = SQL_C_LONG;
+      alloc_size = sizeof(SQLINTEGER);
+      break;
     case SQL_BIGINT:
-      // sprintf(message, "This is a Biggy Integer!\n");
-      // target_type = SQL_C_SBIGINT;
-      // alloc_size = sizeof(long long int);
-      target_type = SQL_C_CHAR;
-      alloc_size = sizeof(char) * col->size + 1;
+      target_type = SQL_C_SBIGINT;
+      alloc_size = sizeof(long long int);
       break;
     case SQL_REAL:
-      // sprintf(message, "Small floaty thingy!\n");
       // target_type = SQL_C_FLOAT;
       // alloc_size = sizeof(float);
     case SQL_FLOAT:
     case SQL_DOUBLE:
-      // sprintf(message, "This is a floating point thingy!\n");
-      // target_type = SQL_C_DOUBLE;
-      // alloc_size = sizeof(double);
-      // break;
+      target_type = SQL_C_DOUBLE;
+      alloc_size = sizeof(double);
+      break;
     case SQL_DECIMAL:
     case SQL_NUMERIC:
-      // sprintf(message, "This is a decimal type!\n");
+      // target_type = SQL_C_NUMERIC;
+      // alloc_size = sizeof(SQL_NUMERIC_STRUCT);
       target_type = SQL_C_CHAR;
-      alloc_size = sizeof(char) * col->size + 2;  // 1 extra for the dot
+      alloc_size = sizeof(SQLCHAR) * col->size + 2;  // 1 extra for the dot
+      padding = 1;
       break;
     case SQL_TYPE_DATE:
+      target_type = SQL_C_TYPE_DATE;
+      alloc_size = sizeof(DATE_STRUCT);
+      break;
     case SQL_DATETIME:
     case SQL_TYPE_TIMESTAMP:
-      // sprintf(message, "This is a date or timey type!\n");
-      target_type = SQL_C_CHAR;
-      alloc_size = sizeof(char) * col->size + 8;
+      target_type = SQL_C_TIMESTAMP;
+      alloc_size = sizeof(TIMESTAMP_STRUCT);
       break;
     default:
-      // sprintf(message, "Could not determine type: %d :(\n", col->data_type);
       target_type = SQL_C_CHAR;
-      alloc_size = sizeof(char) * col->size + 2;
+      alloc_size = sizeof(SQLCHAR) * col->size + 1;
   }
 
   // fprintf(stdout, "allocated %ld bytes\n", alloc_size * arraysize);
-  col->display_size = alloc_size - 1;
+  col->display_size = col->size + padding;
 
   col->target_type = target_type;
   col->data_array = (SQLPOINTER)malloc(alloc_size * arraysize);
@@ -259,7 +293,6 @@ static int checkExecuteResult(SQLCURSOR *cursor) {
   SQLSMALLINT numcols;
 
   SQLCOLUMN *thiscol, *lastcol = NULL;
-  SQLSMALLINT name_len;
   SQLSMALLINT namebuf_size;
 
   tryODBC(SQLNumResultCols(cursor->handle, &numcols),
@@ -274,16 +307,16 @@ static int checkExecuteResult(SQLCURSOR *cursor) {
     thiscol->index = i;
     thiscol->next = NULL;
     thiscol->data_array = NULL;
-    namebuf_size = sizeof(thiscol->name);
+    namebuf_size = COLNAME_LEN;
 
-    tryODBC(SQLDescribeCol(cursor->handle, i, (SQLCHAR*)&thiscol->name,
-                           namebuf_size,
-                           &name_len, &thiscol->data_type,
-                           &thiscol->size, &thiscol->decimal_digits,
-                           &thiscol->nullable),
-            "SQLDescribeCol", cursor->handle, SQL_HANDLE_STMT);
+    tryODBC(SQLDescribeColW(cursor->handle, i, (SQLWCHAR*)&thiscol->name,
+                            namebuf_size,
+                            &thiscol->name_len, &thiscol->data_type,
+                            &thiscol->size, &thiscol->decimal_digits,
+                            &thiscol->nullable),
+            "SQLDescribeColW", cursor->handle, SQL_HANDLE_STMT);
 
-    if (name_len > namebuf_size)
+    if (thiscol->name_len > namebuf_size)
       fprintf(stderr, "Column name for column %d was truncated to %d characters",
              i, namebuf_size);
 
@@ -311,13 +344,7 @@ static int checkExecuteResult(SQLCURSOR *cursor) {
 int CloseCursor(SQLCURSOR *cursor) {
   SQLRETURN ret;
 
-  if (cursor->firstcol)
-    dealloc_columns(cursor->firstcol);
-
-  if (cursor->state == OPENED) {
-    tryODBC(SQLCloseCursor(cursor->handle),
-            "SQLCloseCursor", cursor->handle, SQL_HANDLE_STMT);
-  }
+  free_results(cursor);
 
   if (cursor) {
     ret = tryODBC(SQLFreeHandle(SQL_HANDLE_STMT, cursor->handle),
@@ -354,7 +381,7 @@ int CursorFetch(SQLCURSOR *cursor) {
 
 
 // CursorExecDirect executes a statement on a handle without preparation
-int CursorExecDirect(SQLCURSOR *cursor, char *stmt) {
+int CursorExecDirect(SQLCURSOR *cursor, SQLWCHAR *stmt, SQLLEN stmtlen) {
   int err;
 
   if (!cursor) {
@@ -362,10 +389,16 @@ int CursorExecDirect(SQLCURSOR *cursor, char *stmt) {
     return 100;
   }
 
-  err = tryODBC(SQLExecDirect(cursor->handle, (SQLCHAR*)stmt, strlen(stmt)),
-                "SQLExecDirect", cursor->handle, SQL_HANDLE_STMT);
+  free_results(cursor);
+
+  set_fetch_attributes(cursor);
+
+  err = tryODBC(SQLExecDirectW(cursor->handle, stmt, stmtlen), //strlen((char*)stmt)) / 2,
+                "SQLExecDirectW", cursor->handle, SQL_HANDLE_STMT);
   if (err != 0) {
     return err;
   }
+  cursor->state = OPENED;
+  update_cursor_rowcount(cursor);
   return checkExecuteResult(cursor);
 }

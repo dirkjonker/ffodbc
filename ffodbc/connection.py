@@ -13,9 +13,11 @@ class Connection(object):
 
     def _connect(self, connstr, **kwargs):
         if connstr is None:
-            connstr = ';'.join(k.upper() + '=' + v for k, v in kwargs.items())
-        b_connstr = connstr.encode('utf-8')
-        self._hdbc = lib.NewConnection(self._henv, b_connstr)
+            connstr = ';'.join(k.upper() + '=' + str(v) for k, v in kwargs.items())
+            print(connstr)
+
+        buf = ffi.new('char[]', connstr.encode('utf-16-le'))
+        self._hdbc = lib.NewConnection(self._henv, ffi.cast('SQLWCHAR*', buf), len(connstr))
 
     def close(self):
         """Close the connection now"""

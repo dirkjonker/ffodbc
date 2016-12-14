@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 from ffodbc.connection import Connection
 
 # Python DBAPI 2.0 globals

@@ -11,47 +11,85 @@ ffi.cdef("typedef SQLHANDLE SQLHDBC;")
 ffi.cdef("typedef SQLHANDLE SQLHSTMT;")
 
 ffi.cdef("typedef void * SQLPOINTER;")
-ffi.cdef("typedef signed short int SQLSMALLINT;")
+ffi.cdef("typedef signed short SQLSMALLINT;")
 ffi.cdef("typedef unsigned short int SQLUSMALLINT;")
-ffi.cdef("typedef signed long int SQLINTEGER;")
+ffi.cdef("typedef int SQLINTEGER;")
+ffi.cdef("typedef unsigned int SQLUINTEGER;")
+ffi.cdef("typedef double SQLDOUBLE;")
 ffi.cdef("typedef unsigned char SQLCHAR;")
+ffi.cdef("typedef signed char SQLSCHAR;")
 ffi.cdef("typedef long SQLLEN;")
 ffi.cdef("typedef unsigned long SQLULEN;")
+ffi.cdef("typedef unsigned short WCHAR;")
+ffi.cdef("typedef WCHAR SQLWCHAR;")
+
+ffi.cdef("""typedef struct tagDATE_STRUCT {
+    SQLSMALLINT    year;
+    SQLUSMALLINT   month;
+    SQLUSMALLINT   day;
+} DATE_STRUCT;
+""")
+
+ffi.cdef("""typedef struct tagTIMESTAMP_STRUCT {
+    SQLSMALLINT    year;
+    SQLUSMALLINT   month;
+    SQLUSMALLINT   day;
+    SQLUSMALLINT   hour;
+    SQLUSMALLINT   minute;
+    SQLUSMALLINT   second;
+    SQLUINTEGER    fraction;
+} TIMESTAMP_STRUCT;
+""")
+
+# ffi.cdef("typedef TIMESTAMP_STRUCT SQL_TIMESTAMP_STRUCT;")
+
+ffi.cdef("""typedef struct tagSQL_NUMERIC_STRUCT
+{
+	SQLCHAR		precision;
+	SQLSCHAR	scale;
+	SQLCHAR		sign;	/* 1=pos 0=neg */
+	SQLCHAR		val[16];
+} SQL_NUMERIC_STRUCT;
+""")
 
 ffi.cdef("""typedef struct Column {
-  SQLUSMALLINT index;
-  SQLCHAR name[255];
-  SQLSMALLINT data_type;
-  SQLSMALLINT target_type;
-  SQLULEN size;
-  SQLULEN display_size;
-  SQLSMALLINT decimal_digits;
-  SQLSMALLINT nullable;
-  SQLPOINTER data_array;
-  SQLLEN *indicator;
-  struct Column *next;
+    SQLUSMALLINT index;
+    SQLWCHAR name[255];
+    SQLSMALLINT name_len;
+    SQLSMALLINT data_type;
+    SQLSMALLINT target_type;
+    SQLULEN size;
+    SQLULEN display_size;
+    SQLSMALLINT decimal_digits;
+    SQLSMALLINT nullable;
+    SQLPOINTER data_array;
+    SQLLEN *indicator;
+    struct Column *next;
 } SQLCOLUMN;
 """)
 
 ffi.cdef("typedef enum state {OPENED, CLOSED} cursor_state;")
 
 ffi.cdef("""typedef struct Cursor {
-  SQLHSTMT handle;
-  cursor_state state;
-  SQLULEN arraysize;
-  SQLCOLUMN *firstcol;
+    SQLHSTMT handle;
+    cursor_state state;
+    SQLULEN arraysize;
+    SQLCOLUMN *firstcol;
+    SQLLEN rowcount;
+    SQLULEN rows_fetched;
+    SQLUSMALLINT *row_status;
 } SQLCURSOR;
 """)
 
 ffi.cdef("""typedef struct Error {
-  char state[7];
-  int native;
-  char text[256];
+    char state[7];
+    int native;
+    char text[256];
 } ODBCERROR;
 """)
 
 ffi.cdef("SQLHENV Initialize();")
-ffi.cdef("SQLHDBC NewConnection(char *connstr, SQLHENV env);")
+ffi.cdef("SQLHDBC NewConnection(SQLHENV env, SQLWCHAR *connstr, SQLLEN connstrlen);")
 ffi.cdef("void CloseConnection(SQLHENV henv, SQLHDBC hdbc);")
 
 ffi.cdef("void FreeError(ODBCERROR *error);")
@@ -59,8 +97,7 @@ ffi.cdef("void FreeError(ODBCERROR *error);")
 ffi.cdef("SQLCURSOR * NewCursor(SQLHDBC hdbc);")
 ffi.cdef("int CloseCursor(SQLCURSOR *cursor);")
 ffi.cdef("int CursorSetArraysize(SQLHSTMT hstmt, SQLULEN arraysize);")
-ffi.cdef("long CursorRowCount(SQLCURSOR *cursor);")
-ffi.cdef("int CursorExecDirect(SQLCURSOR *cursor, char *stmt);")
+ffi.cdef("int CursorExecDirect(SQLCURSOR *cursor, SQLWCHAR *stmt, SQLLEN stmtlen);")
 ffi.cdef("int CursorFetch(SQLCURSOR *cursor);")
 ffi.cdef("ODBCERROR *ExtractError(SQLHANDLE handle, SQLSMALLINT type);")
 
