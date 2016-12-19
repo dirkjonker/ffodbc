@@ -9,4 +9,5 @@ paramstyle = 'qmark'
 def connect(*args, **kwargs):
     return Connection(*args, **kwargs)
 
+
 __all__ = [connect]

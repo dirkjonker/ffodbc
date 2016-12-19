@@ -33,6 +33,7 @@ typedef struct Cursor {
   SQLHSTMT handle;
   cursor_state state;
   SQLULEN arraysize;
+  SQLSMALLINT numcols;
   SQLCOLUMN *firstcol;
   SQLLEN rowcount;
   SQLULEN rows_fetched;
@@ -70,9 +71,10 @@ ODBCERROR *ExtractError(SQLHANDLE handle, SQLSMALLINT type) {
   ret = SQLGetDiagRec(type, handle, 1, (SQLCHAR*)error->state,
                       (SQLINTEGER*)&error->native,
                       (SQLCHAR*)error->text, sizeof(error->text), &len);
-  if (SQL_SUCCEEDED(ret)) {
-    fprintf(stderr, "[%s:%d] %s\n\n", error->state, error->native, error->text);
-  } else {
+  // if (SQL_SUCCEEDED(ret)) {
+    // fprintf(stderr, "[%s:%d] %s\n\n", error->state, error->native, error->text);
+  // } else {
+  if (!SQL_SUCCEEDED(ret)) {
     free(error);
     error = NULL;
   }
@@ -82,6 +84,9 @@ ODBCERROR *ExtractError(SQLHANDLE handle, SQLSMALLINT type) {
 
 // tryODBC deals with the return value of any ODBC command
 static int tryODBC(SQLRETURN rc, char *f, SQLHANDLE handle, SQLSMALLINT type) {
+  if (rc == SQL_NO_DATA) {
+    return (int)rc;
+  }
   if (!SQL_SUCCEEDED(rc)) {
     fprintf(stderr, "The ODBC driver reported an error running %s\n\n", f);
     ExtractError(handle, type);
@@ -147,7 +152,10 @@ static void free_results(SQLCURSOR *cursor) {
     // tryODBC(SQLFreeStmt(cursor->handle, SQL_UNBIND),
     //         "SQLFreeStmt", cursor->handle, SQL_HANDLE_STMT);
 
-    if (cursor->row_status) free(cursor->row_status);
+    if (cursor->row_status) {
+      free(cursor->row_status);
+      cursor->row_status = NULL;
+    };
 
     dealloc_columns(cursor->firstcol);
 
@@ -175,17 +183,17 @@ SQLCURSOR * NewCursor(SQLHDBC hdbc) {
 }
 
 
-// CursorSetArraysize sets the size for the array
-// that it fetch when calling SQLFetch
-int CursorSetArraysize(SQLCURSOR *cursor, SQLULEN arraysize) {
-  SQLRETURN ret;
-
-  ret = tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROW_ARRAY_SIZE,
-                         (SQLPOINTER)arraysize, 0),
-           "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
-  cursor->arraysize = arraysize;
-  return ret;
-}
+// // CursorSetArraysize sets the size for the array
+// // that it fetch when calling SQLFetch
+// int CursorSetArraysize(SQLCURSOR *cursor, SQLULEN arraysize) {
+//   SQLRETURN ret;
+//
+//   ret = tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROW_ARRAY_SIZE,
+//                          (SQLPOINTER)arraysize, 0),
+//            "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
+//   cursor->arraysize = arraysize;
+//   return ret;
+// }
 
 
 // update_cursor_rowcount updates the number of rows
@@ -196,7 +204,10 @@ void update_cursor_rowcount(SQLCURSOR *cursor) {
 }
 
 
+// set_fetch_attributes sets all the correct attributes
+// we need to prepare for some proper fetchin'
 static void set_fetch_attributes(SQLCURSOR *cursor) {
+  // fprintf(stdout, "Setting arraysize to: %d\n", (int)cursor->arraysize);
   tryODBC(SQLSetStmtAttr(cursor->handle, SQL_ATTR_ROW_ARRAY_SIZE,
                          (SQLPOINTER)cursor->arraysize, 0),
           "SQLSetStmtAttr", cursor->handle, SQL_HANDLE_STMT);
@@ -290,19 +301,17 @@ static void bindCol(SQLHSTMT hstmt, SQLULEN arraysize, struct Column *col) {
 
 // checkExecuteResult checks the columns after a SQLExecute
 static int checkExecuteResult(SQLCURSOR *cursor) {
-  SQLSMALLINT numcols;
-
   SQLCOLUMN *thiscol, *lastcol = NULL;
   SQLSMALLINT namebuf_size;
 
-  tryODBC(SQLNumResultCols(cursor->handle, &numcols),
+  tryODBC(SQLNumResultCols(cursor->handle, &cursor->numcols),
           "SQLNumResultCols", cursor->handle, SQL_HANDLE_STMT);
 
-  if (numcols == 0) {
+  if (cursor->numcols == 0) {
     return -1;
   }
 
-  for (SQLUSMALLINT i=1; i <= numcols; i++) {
+  for (SQLUSMALLINT i=1; i <= cursor->numcols; i++) {
     thiscol = (SQLCOLUMN*)(malloc(sizeof(SQLCOLUMN)));
     thiscol->index = i;
     thiscol->next = NULL;
@@ -372,6 +381,8 @@ int CursorFetch(SQLCURSOR *cursor) {
   }
 
   ret = SQLFetch(cursor->handle);
+
+  // fprintf(stdout, "Arraysize: %d, Rows fetched: %d\n", (int)cursor->arraysize, (int)cursor->rows_fetched);
 
   if (ret == SQL_NO_DATA) return 1;
 

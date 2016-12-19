@@ -36,7 +36,7 @@ def test_kwargs_connect():
 def connection():
     conn = ffodbc.connect(CONNSTR)
     cur = conn.cursor()
-    # cur.execute("DROP TABLE test;")
+    cur.execute("IF EXISTS (SELECT * FROM sys.tables WHERE name = 'test') DROP TABLE test;")
     cur.execute("CREATE TABLE test (value NVARCHAR(20), date DATE);")
     stmt = '\n'.join("INSERT INTO test (value, date) VALUES (N'Hallo, {}!', '2016-01-28');"
                      .format(i) for i in range(100))
@@ -211,14 +211,14 @@ def test_cursor_fetch_double(cursor):
 
 
 def test_unicode_short(cursor):
-    """Test proper unicode handling."""
+    """Test proper unicode fetching."""
     cursor.execute("SELECT CAST(N'Hallo \u24b9\u24d8\u24e1\u24da!' AS NVARCHAR(12)) AS v;")
     result = cursor.fetchone()
     assert result[0] == 'Hallo Ⓓⓘⓡⓚ!'
 
 
 def test_unicode_emoji(cursor):
-    """Test proper unicode handling for emojis."""
+    """Test proper unicode fetching for emojis."""
     cursor.execute("SELECT CAST(NCHAR(0xD83D) + NCHAR(0xDE00) AS NVARCHAR(3)) AS v;")
     result = cursor.fetchone()
     assert result[0] == '😀'
@@ -256,3 +256,23 @@ def test_cursor_reuse(cursor):
     # run a new query even though it has an active set
     cursor.execute("SELECT TOP 20 value FROM test ORDER BY 1 DESC;")
     assert cursor.fetchone()[0] == 'Hallo, 99!'
+
+
+def test_cursor_underalloc(cursor):
+    """Test underallocating the arraysize and fetchmany does not cause errors."""
+    cursor.arraysize = 8
+    cursor.execute("SELECT TOP 10 value FROM test")
+    rows = cursor.fetchall()
+    assert len(rows) == 10
+    assert rows[0][0] == 'Hallo, 0!'
+    assert rows[-1][0] == 'Hallo, 9!'
+
+
+def test_cursor_overalloc(cursor):
+    """Test overallocating the arraysize and fetchmany does not cause errors."""
+    cursor.arraysize = 20
+    cursor.execute("SELECT TOP 10 value FROM test")
+    rows = cursor.fetchmany(20)
+    assert len(rows) == 10
+    assert rows[0][0] == 'Hallo, 0!'
+    assert rows[-1][0] == 'Hallo, 9!'

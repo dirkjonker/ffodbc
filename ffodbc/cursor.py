@@ -22,6 +22,7 @@ class Cursor(object):
 
         self._arraysize = 1
         self._rowptr = 0
+        self._rows_fetched = 0
 
         self.description = None
 
@@ -49,7 +50,7 @@ class Cursor(object):
             raise TypeError('Arraysize must be type int > 0')
         if value <= 0:
             raise ValueError('Arraysize must be > 0')
-        self._call(lib.CursorSetArraysize(self._cursor, value))
+        self._cursor.arraysize = ffi.cast("int", value)
         self._arraysize = value
 
     def callproc(self, procname, parameters):
@@ -67,7 +68,8 @@ class Cursor(object):
         description = []
         col = self._cursor.firstcol
         while col:
-            colname = bytes(ffi.buffer(col.name))[:col.name_len * 2].decode('utf-16-le')
+            colname = bytes(ffi.buffer(col.name))[:col.name_len * 2] \
+                            .decode('utf-16-le')
             ctype = TYPEMAP.get(col.data_type, str)
             if ctype is Decimal:
                 precision = col.size
@@ -84,9 +86,10 @@ class Cursor(object):
         """Execute a statement."""
         c_stmt = ffi.new('char[]', operation.encode('utf-16-le'))
         if parameters is None:
-            self._call(lib.CursorExecDirect(self._cursor, ffi.cast('SQLWCHAR*', c_stmt), len(operation)))
+            self._call(lib.CursorExecDirect(self._cursor, ffi.cast('SQLWCHAR*',
+                                            c_stmt), len(operation)))
         else:
-            raise NotImplementedError("Parameterized queries not yet supported")
+            raise NotImplementedError("Parameterized queries not implemented")
         self._set_description()
         return self
 
@@ -96,6 +99,16 @@ class Cursor(object):
             self.execute(operation, parameters)
         return self
 
+    def _internal_fetch(self):
+        mv = min(self.arraysize, self._rows_fetched)
+        if self._rowptr >= mv:
+            self._rowptr = 0
+            self._rows_fetched = 0
+        if self._rowptr == 0:
+            ret = self._call(lib.CursorFetch(self._cursor))
+            self._rows_fetched = self._cursor.rows_fetched
+            return ret
+
     def fetchone(self):
         """Fetch a single result row from the cursor.
 
@@ -104,10 +117,8 @@ class Cursor(object):
         we deplete this buffer we reset the array pointer to 0 which
         will trigger a new call to SQLFetch when requesting a new row.
         """
-        if self._rowptr == 0:
-            ret = self._call(lib.CursorFetch(self._cursor))
-            if ret == 1:
-                return
+        if self._internal_fetch() == 1:  # no data
+            return
         row = []
         col = self._cursor.firstcol
         for d in self.description:
@@ -159,18 +170,15 @@ class Cursor(object):
             row.append(val)
             col = col.next
         self._rowptr += 1
-        if self._rowptr >= self._arraysize:
-            self._rowptr = 0
         return tuple(row)
 
     def fetchmany(self, size=None):
         """Fetch many result rows from the cursor."""
         if size is None:
             size = self._arraysize
-        rows = []
-        for i in range(size):
-            rows.append(self.fetchone())
-        return rows
+        first = self.fetchone()
+        batchsize = min(self._rows_fetched, size)
+        return [first] + [self.fetchone() for i in range(batchsize - 1)]
 
     def fetchall(self):
         """Fetch all result rows from the cursor."""
