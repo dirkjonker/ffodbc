@@ -10,24 +10,26 @@ import pytest
 import ffodbc
 from ffodbc.tools import unmarshal_date
 
-CONNSTR = 'DRIVER=FreeTDS;SERVER=localhost;PORT=1433;UID=sa;PWD=P@55w0rd;DATABASE=test;'
+CONNSTR = 'DRIVER={ODBC Driver 13 for SQL Server};SERVER=localhost;PORT=1433;UID=sa;PWD=P@55w0rd;DATABASE=test;'
 
 
 def test_connect():
     conn = ffodbc.connect(CONNSTR)
     cur = conn.cursor()
     cur.execute("SELECT 1;")
-    assert cur.fetchone()[0] == 1
+    result = cur.fetchone()
+    assert result[0] == 1
     cur.close()
     conn.close()
 
 
 def test_kwargs_connect():
-    conn = ffodbc.connect(driver="FreeTDS", server='localhost',
+    conn = ffodbc.connect(driver="ODBC Driver 13 for SQL Server", server='localhost',
                           port=1433, db="test", uid="sa", pwd="P@55w0rd")
     cur = conn.cursor()
     cur.execute("SELECT 1;")
-    assert cur.fetchone()[0] == 1
+    result = cur.fetchone()
+    assert result[0] == 1
     cur.close()
     conn.close()
 

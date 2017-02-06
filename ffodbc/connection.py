@@ -7,7 +7,7 @@ from ffodbc.cursor import Cursor
 
 class Connection(object):
     def __init__(self, connstr=None, **kwargs):
-        self._henv = lib.Initialize()
+        self._henv = lib.initialize()
         self._hdbc = None
         self._connect(connstr, **kwargs)
 
@@ -17,13 +17,13 @@ class Connection(object):
             connstr = ';'.join(pairs)
 
         buf = ffi.new('char[]', connstr.encode('utf-16-le'))
-        self._hdbc = lib.NewConnection(self._henv, ffi.cast('SQLWCHAR*', buf),
+        self._hdbc = lib.create_connection(self._henv, ffi.cast('SQLWCHAR*', buf),
                                        len(connstr))
 
     def close(self):
         """Close the connection now"""
         if self._hdbc != ffi.NULL:
-            lib.CloseConnection(self._henv, self._hdbc)
+            lib.close_connection(self._henv, self._hdbc)
             self._hdbc = ffi.NULL
 
     def commit(self):

@@ -89,21 +89,21 @@ ffi.cdef("""typedef struct Error {
 } ODBCERROR;
 """)
 
-ffi.cdef("SQLHENV Initialize();")
+ffi.cdef("SQLHENV initialize();")
 ffi.cdef("""
-    SQLHDBC NewConnection(SQLHENV env, SQLWCHAR *connstr, SQLLEN connstrlen);
+    SQLHDBC create_connection(SQLHENV env, SQLWCHAR *connstr, SQLLEN connstrlen);
 """)
-ffi.cdef("void CloseConnection(SQLHENV henv, SQLHDBC hdbc);")
+ffi.cdef("void close_connection(SQLHENV henv, SQLHDBC hdbc);")
 
-ffi.cdef("void FreeError(ODBCERROR *error);")
+ffi.cdef("void free_error(ODBCERROR *error);")
 
-ffi.cdef("SQLCURSOR * NewCursor(SQLHDBC hdbc);")
-ffi.cdef("int CloseCursor(SQLCURSOR *cursor);")
+ffi.cdef("SQLCURSOR * create_cursor(SQLHDBC hdbc);")
+ffi.cdef("int close_cursor(SQLCURSOR *cursor);")
 ffi.cdef("""
-    int CursorExecDirect(SQLCURSOR *cursor, SQLWCHAR *stmt, SQLLEN stmtlen);
+    int cursor_execdirect(SQLCURSOR *cursor, SQLWCHAR *stmt, SQLLEN stmtlen);
 """)
-ffi.cdef("int CursorFetch(SQLCURSOR *cursor);")
-ffi.cdef("ODBCERROR *ExtractError(SQLHANDLE handle, SQLSMALLINT type);")
+ffi.cdef("int cursor_fetch(SQLCURSOR *cursor);")
+ffi.cdef("ODBCERROR *extract_error(SQLHANDLE handle, SQLSMALLINT type);")
 
 loc = os.path.dirname(os.path.abspath(__file__))
 code_loc = os.path.join(loc, "ffodbc.c")

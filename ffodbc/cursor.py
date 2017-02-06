@@ -17,7 +17,7 @@ ColumnDescription = namedtuple('ColumnDescription', [
 class Cursor(object):
     def __init__(self, connection):
         self._connection = connection
-        self._cursor = lib.NewCursor(self._connection._hdbc)
+        self._cursor = lib.create_cursor(self._connection._hdbc)
         self._opened = True
 
         self._arraysize = 1
@@ -35,7 +35,7 @@ class Cursor(object):
         if self._opened is False:
             raise ProgrammingError("Calling on a closed cursor")
         if ret not in (0, 1):
-            error = lib.ExtractError(self._cursor.handle, 3)
+            error = lib.extract_error(self._cursor.handle, 3)
             if error:
                 _raise_error(error)
         return ret
@@ -60,7 +60,7 @@ class Cursor(object):
     def close(self):
         """Close the cursor now."""
         if self._opened:
-            self._call(lib.CloseCursor(self._cursor))
+            self._call(lib.close_cursor(self._cursor))
             self._cursor = ffi.NULL
             self._opened = False
 
@@ -86,7 +86,7 @@ class Cursor(object):
         """Execute a statement."""
         c_stmt = ffi.new('char[]', operation.encode('utf-16-le'))
         if parameters is None:
-            self._call(lib.CursorExecDirect(self._cursor, ffi.cast('SQLWCHAR*',
+            self._call(lib.cursor_execdirect(self._cursor, ffi.cast('SQLWCHAR*',
                                             c_stmt), len(operation)))
         else:
             raise NotImplementedError("Parameterized queries not implemented")
@@ -105,7 +105,7 @@ class Cursor(object):
             self._rowptr = 0
             self._rows_fetched = 0
         if self._rowptr == 0:
-            ret = self._call(lib.CursorFetch(self._cursor))
+            ret = self._call(lib.cursor_fetch(self._cursor))
             self._rows_fetched = self._cursor.rows_fetched
             return ret
 
@@ -149,7 +149,6 @@ class Cursor(object):
             # if d.type_code is Decimal:
             #     raw = ffi.cast('SQL_NUMERIC_STRUCT*', col.data_array)
             #     val = ffi.string(raw.val)
-            #     print(val)
             #     row.append(Decimal((raw.sign, (int(val, 16),), raw.scale)))
             #     col = col.next
             #     continue

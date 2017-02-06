@@ -22,7 +22,7 @@ def _raise_error(error):
     message = '[{}] {}'.format(state, ffi.string(error.text).decode('utf-8'))
 
     # free the memory before raising any error
-    lib.FreeError(error)
+    lib.free_error(error)
     error = ffi.NULL
 
     if status_code == '42':
