@@ -4,13 +4,19 @@ These tests require a MSSQL database running on localhost
 
 from datetime import date, datetime
 from decimal import Decimal
+import sys
 
 import pytest
 
 import ffodbc
 from ffodbc.tools import unmarshal_date
 
-CONNSTR = 'DRIVER={ODBC Driver 13 for SQL Server};SERVER=localhost;PORT=1433;UID=sa;PWD=P@55w0rd;DATABASE=test;'
+if sys.platform == 'darwin':
+    driver = 'FreeTDS'
+else:
+    driver = '{ODBC Driver 13 for SQL Server}'
+
+CONNSTR = 'DRIVER={};SERVER=localhost;PORT=1433;UID=sa;PWD=P@55w0rd;DATABASE=test;'.format(driver)
 
 
 def test_connect():
@@ -24,11 +30,12 @@ def test_connect():
 
 
 def test_kwargs_connect():
-    conn = ffodbc.connect(driver="ODBC Driver 13 for SQL Server", server='localhost',
+    conn = ffodbc.connect(driver=driver, server='localhost',
                           port=1433, db="test", uid="sa", pwd="P@55w0rd")
     cur = conn.cursor()
     cur.execute("SELECT 1;")
     result = cur.fetchone()
+    print(result)
     assert result[0] == 1
     cur.close()
     conn.close()
